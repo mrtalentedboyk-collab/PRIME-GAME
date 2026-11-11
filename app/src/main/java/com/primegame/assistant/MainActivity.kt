@@ -3,17 +3,23 @@ package com.primegame.assistant
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color
+import android.graphics.Typeface
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.view.Gravity
 import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.Space
+import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : ComponentActivity() {
 
     private lateinit var projectionManager: MediaProjectionManager
 
@@ -46,39 +52,39 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
 
-        val layout = android.widget.LinearLayout(this).apply {
-            orientation = android.widget.LinearLayout.VERTICAL
-            gravity = android.view.Gravity.CENTER
-            setBackgroundColor(android.graphics.Color.parseColor("#0B0E14"))
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setBackgroundColor(Color.parseColor("#0B0E14"))
             setPadding(60, 60, 60, 60)
         }
 
-        val title = android.widget.TextView(this).apply {
+        val title = TextView(this).apply {
             text = "PRIME GAME ASSISTANT"
-            setTextColor(android.graphics.Color.parseColor("#00E5FF"))
+            setTextColor(Color.parseColor("#00E5FF"))
             textSize = 22f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            gravity = android.view.Gravity.CENTER
+            setTypeface(null, Typeface.BOLD)
+            gravity = Gravity.CENTER
             setPadding(0, 0, 0, 80)
         }
 
         val btnStart = Button(this).apply {
             text = "START PRIME HUD"
-            setBackgroundColor(android.graphics.Color.parseColor("#00E5FF"))
-            setTextColor(android.graphics.Color.BLACK)
+            setBackgroundColor(Color.parseColor("#00E5FF"))
+            setTextColor(Color.BLACK)
             setOnClickListener { checkOverlayPermission() }
         }
 
         val btnLaunchGame = Button(this).apply {
             text = "LAUNCH CARROM POOL"
-            setBackgroundColor(android.graphics.Color.parseColor("#1F2937"))
-            setTextColor(android.graphics.Color.WHITE)
+            setBackgroundColor(Color.parseColor("#1F2937"))
+            setTextColor(Color.WHITE)
             setOnClickListener { launchCarromPool() }
         }
 
         layout.addView(title)
         layout.addView(btnStart)
-        layout.addView(android.widget.Space(this).apply { minimumHeight = 40 })
+        layout.addView(Space(this).apply { minimumHeight = 40 })
         layout.addView(btnLaunchGame)
         setContentView(layout)
     }
