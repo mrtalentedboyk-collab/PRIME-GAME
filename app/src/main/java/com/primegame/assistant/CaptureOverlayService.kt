@@ -14,6 +14,8 @@ import android.provider.Settings
 import android.view.*
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Switch
+import android.widget.CompoundButton
 import java.util.concurrent.atomic.AtomicBoolean
 
 class CaptureOverlayService : Service() {
@@ -36,6 +38,7 @@ class CaptureOverlayService : Service() {
     private var captureHeight = 1280
     private val handler = Handler(Looper.getMainLooper())
     private var statusText: TextView? = null
+    private val prefs by lazy { getSharedPreferences("prime_settings", Context.MODE_PRIVATE) }
 
     override fun onBind(intent: Intent?) = null
 
@@ -98,7 +101,7 @@ class CaptureOverlayService : Service() {
                 lastFrameAt = System.currentTimeMillis()
                 image.close()
                 handler.post {
-                    statusText?.text = "SCREEN CAPTURE ACTIVE\nFrames received: $frameCount\nBoard analysis: not available in this build"
+                    statusText?.text = "SCREEN SHARE ACTIVE  •  $frameCount frames\nBoard tracking: prototype / not verified"
                 }
             }
         }, handler)
@@ -118,68 +121,66 @@ class CaptureOverlayService : Service() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(18, 14, 18, 14)
-            setBackgroundColor(Color.argb(232, 13, 12, 20))
+            setPadding(16, 13, 16, 13)
+            background = GradientDrawable().apply { setColor(Color.argb(246, 12, 20, 34)); cornerRadius = 24f; setStroke(1, Color.rgb(40, 220, 190)) }
         }
         val header = TextView(this).apply {
-            text = "PRIME GAME  ×"
-            textSize = 14f
-            setTextColor(Color.rgb(255, 215, 0))
-            setTypeface(null, Typeface.BOLD)
+            text = "PRIME GAME     •     DRAG TO MOVE"
+            textSize = 13f; setTextColor(Color.rgb(40, 220, 190)); setTypeface(null, Typeface.BOLD)
+            setPadding(3, 4, 3, 10)
             setOnClickListener { stopSelf() }
         }
         statusText = TextView(this).apply {
-            text = "SCREEN CAPTURE ACTIVE\nWaiting for frames…\nLive prediction not enabled"
-            textSize = 11f
-            setTextColor(Color.WHITE)
-            setPadding(0, 12, 0, 8)
+            text = "SCREEN SHARE ACTIVE\nWaiting for frames…"
+            textSize = 10f; setTextColor(Color.WHITE); setPadding(2, 5, 2, 9)
         }
-        val aim = TextView(this).apply {
-            text = "AIM PREDICTION: NOT AVAILABLE"
-            textSize = 10f
-            setTextColor(Color.rgb(255, 215, 0))
-            setPadding(0, 8, 0, 4)
+        val close = TextView(this).apply {
+            text = "CLOSE HUD  ×"; textSize = 9f; gravity = Gravity.END
+            setTextColor(Color.LTGRAY); setPadding(2, 2, 2, 8)
+            setOnClickListener { stopSelf() }
         }
-        val hint = TextView(this).apply {
-            text = "Tap PRIME GAME × to close HUD"
-            textSize = 9f
-            setTextColor(Color.LTGRAY)
+        panel.addView(header); panel.addView(close); panel.addView(statusText)
+        addSwitch(panel, "Aim prediction", "aim_prediction", true, "Prediction display enabled")
+        addSwitch(panel, "Auto aim assist", "auto_aim", false, "Assist preference saved; no automatic game input")
+        addSwitch(panel, "Coin collision lines", "collision_lines", true, "Collision-line display preference saved")
+        addSwitch(panel, "Bank shot guide", "bank_shot", false, "Bank-shot guide preference saved")
+        addSwitch(panel, "Power guide", "power_guide", true, "Power-guide preference saved")
+        val note = TextView(this).apply {
+            text = "Controls are active. Live coin/striker recognition and calculated paths are not yet validated. No game touches are automated.\nTap × to close."
+            textSize = 9f; setTextColor(Color.LTGRAY); setPadding(2, 10, 2, 2)
         }
-        panel.addView(header); panel.addView(statusText); panel.addView(aim); panel.addView(hint)
+        panel.addView(note)
         overlay = panel
-        val type = if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                   else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            type,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.END
-            x = 12; y = 160
+        val type = if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
+        val params = WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT, type,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN, PixelFormat.TRANSLUCENT).apply {
+            gravity = Gravity.TOP or Gravity.END; x = 12; y = 130
         }
-        panel.setOnTouchListener(object : View.OnTouchListener {
-            private var downX = 0f; private var downY = 0f
-            private var initialX = 0; private var initialY = 0
+        header.setOnTouchListener(object : View.OnTouchListener {
+            private var downX = 0f; private var downY = 0f; private var initialX = 0; private var initialY = 0
             override fun onTouch(v: View, event: MotionEvent): Boolean {
                 when (event.action) {
-                    MotionEvent.ACTION_DOWN -> {
-                        downX = event.rawX; downY = event.rawY
-                        initialX = params.x; initialY = params.y
-                        return true
-                    }
-                    MotionEvent.ACTION_MOVE -> {
-                        params.x = (initialX - (event.rawX - downX)).toInt()
-                        params.y = (initialY + (event.rawY - downY)).toInt()
-                        windowManager?.updateViewLayout(panel, params)
-                        return true
-                    }
+                    MotionEvent.ACTION_DOWN -> { downX = event.rawX; downY = event.rawY; initialX = params.x; initialY = params.y; return true }
+                    MotionEvent.ACTION_MOVE -> { params.x = (initialX - (event.rawX - downX)).toInt(); params.y = (initialY + (event.rawY - downY)).toInt(); windowManager?.updateViewLayout(panel, params); return true }
+                    MotionEvent.ACTION_UP -> { return true }
                 }
                 return false
             }
         })
         try { windowManager?.addView(panel, params) } catch (_: Exception) { stopSelf() }
+    }
+
+    private fun addSwitch(parent: LinearLayout, title: String, key: String, defaultValue: Boolean, message: String) {
+        val control = Switch(this).apply {
+            text = title; textSize = 11f; setTextColor(Color.WHITE)
+            isChecked = prefs.getBoolean(key, defaultValue)
+            setPadding(2, 4, 2, 4)
+            setOnCheckedChangeListener { _: CompoundButton, checked: Boolean ->
+                prefs.edit().putBoolean(key, checked).apply()
+                statusText?.text = if (checked) "$title: ON\n$message" else "$title: OFF\nDisplay mode disabled"
+            }
+        }
+        parent.addView(control)
     }
 
     override fun onDestroy() {
