@@ -15,6 +15,7 @@ import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.util.DisplayMetrics
 import android.view.*
 import android.widget.*
@@ -34,6 +35,9 @@ class CaptureOverlayService : Service() {
     private var screenDensity = 420
     @Volatile private var isProcessingFrame = false
     private val mainHandler = Handler(Looper.getMainLooper())
+    
+    // Auto Play Cooldown
+    private var autoPlayLockTime = 0L
 
     override fun onBind(intent: Intent?) = null
 
@@ -43,8 +47,7 @@ class CaptureOverlayService : Service() {
         sharedPreferences = getSharedPreferences("PrimeGamePrefs", Context.MODE_PRIVATE)
         
         val metrics = DisplayMetrics()
-        val displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
-        displayManager.getDisplay(0)?.getRealMetrics(metrics)
+        (getSystemService(Context.DISPLAY_SERVICE) as DisplayManager).getDisplay(0)?.getRealMetrics(metrics)
         screenWidth = metrics.widthPixels
         screenHeight = metrics.heightPixels
         screenDensity = metrics.densityDpi
@@ -56,28 +59,11 @@ class CaptureOverlayService : Service() {
 
     private fun startForegroundServiceNotification() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                "PrimeGameOverlayChannel",
-                "HUD",
-                NotificationManager.IMPORTANCE_LOW
-            )
+            val channel = NotificationChannel("PrimeGameOverlayChannel", "HUD", NotificationManager.IMPORTANCE_LOW)
             getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
         }
-        
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, "PrimeGameOverlayChannel")
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-        }
-        
-        val notification = builder
-            .setContentTitle("PRIME GAME Active")
-            .setContentText("Aim Prediction Engine Running")
-            .setSmallIcon(android.R.drawable.ic_menu_compass)
-            .build()
-            
-        startForeground(2001, notification)
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.Builder(this, "PrimeGameOverlayChannel") else @Suppress("DEPRECATION") Notification.Builder(this)
+        startForeground(2001, builder.setContentTitle("PRIME GAME Active").setSmallIcon(android.R.drawable.ic_menu_compass).build())
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -85,15 +71,8 @@ class CaptureOverlayService : Service() {
         val resultData = intent?.getParcelableExtra<Intent>("RESULT_DATA")
         
         if (resultCode == Activity.RESULT_OK && resultData != null && mediaProjection == null) {
-            val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            mediaProjection = projectionManager.getMediaProjection(resultCode, resultData)
-            
-            mediaProjection?.registerCallback(object : MediaProjection.Callback() {
-                override fun onStop() {
-                    stopSelf()
-                }
-            }, mainHandler)
-            
+            mediaProjection = (getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager).getMediaProjection(resultCode, resultData)
+            mediaProjection?.registerCallback(object : MediaProjection.Callback() { override fun onStop() { stopSelf() } }, mainHandler)
             startScreenCapture()
         }
         return START_STICKY
@@ -104,226 +83,85 @@ class CaptureOverlayService : Service() {
             isAimPredictionEnabled = sharedPreferences.getBoolean("aim_pred", false)
             isCollisionLinesEnabled = sharedPreferences.getBoolean("coin_col", false)
         }
-        val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        } else {
-            @Suppress("DEPRECATION")
-            WindowManager.LayoutParams.TYPE_PHONE
-        }
-        
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.MATCH_PARENT,
-            layoutType,
-            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT
-        )
+        val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
+        val params = WindowManager.LayoutParams(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT, layoutType, WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, PixelFormat.TRANSLUCENT)
         windowManager.addView(predictionCanvas, params)
     }
 
     @SuppressLint("ClickableViewAccessibility")
     private fun setupFloatingHud() {
-        val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        } else {
-            @Suppress("DEPRECATION")
-            WindowManager.LayoutParams.TYPE_PHONE
-        }
-        
-        val hudParams = WindowManager.LayoutParams(
-            (screenWidth * 0.82f).toInt(),
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            layoutType,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = 40
-            y = 120
-        }
+        val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
+        val hudParams = WindowManager.LayoutParams((screenWidth * 0.82f).toInt(), WindowManager.LayoutParams.WRAP_CONTENT, layoutType, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.START; x = 40; y = 120 }
 
         val rootContainer = FrameLayout(this)
-
-        // Full Menu View
-        val fullMenu = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(32, 24, 32, 24)
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#E60D131A"))
-                cornerRadius = 24f
-                setStroke(2, Color.parseColor("#00E5FF"))
-            }
-        }
-
-        // Minimized View (Floating Icon)
-        val miniMenu = TextView(this).apply {
-            text = " PRIME "
-            setTextColor(Color.BLACK)
-            textSize = 16f
-            typeface = Typeface.DEFAULT_BOLD
-            setPadding(40, 20, 40, 20)
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#00E5FF"))
-                cornerRadius = 50f
-            }
-            visibility = View.GONE
-        }
-
-        // Header Layout
+        val fullMenu = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 24, 32, 24); background = GradientDrawable().apply { setColor(Color.parseColor("#E60D131A")); cornerRadius = 24f; setStroke(2, Color.parseColor("#00E5FF")) } }
+        val miniMenu = TextView(this).apply { text = " PRIME "; setTextColor(Color.BLACK); textSize = 16f; typeface = Typeface.DEFAULT_BOLD; setPadding(40, 20, 40, 20); background = GradientDrawable().apply { setColor(Color.parseColor("#00E5FF")); cornerRadius = 50f }; visibility = View.GONE }
+        
         val header = RelativeLayout(this)
-        
-        val titleText = TextView(this@CaptureOverlayService).apply {
-            text = "PRIME GAME • DRAG TO MOVE"
-            setTextColor(Color.parseColor("#00E5FF"))
-            textSize = 13f
-            typeface = Typeface.DEFAULT_BOLD
-        }
-        
-        val btnLayout = LinearLayout(this@CaptureOverlayService).apply {
+        val btnLayout = LinearLayout(this).apply { 
             orientation = LinearLayout.HORIZONTAL
-            
-            val minBtn = TextView(this@CaptureOverlayService).apply {
-                text = "– MIN"
-                setTextColor(Color.YELLOW)
-                textSize = 12f
-                setPadding(0, 0, 30, 0)
-                setOnClickListener {
-                    fullMenu.visibility = View.GONE
-                    miniMenu.visibility = View.VISIBLE
-                    hudParams.width = WindowManager.LayoutParams.WRAP_CONTENT
-                    windowManager.updateViewLayout(rootContainer, hudParams)
-                }
-            }
-            
-            val closeBtn = TextView(this@CaptureOverlayService).apply {
-                text = "× CLOSE"
-                setTextColor(Color.LTGRAY)
-                textSize = 12f
-                setOnClickListener { stopSelf() }
-            }
-            
-            addView(minBtn)
-            addView(closeBtn)
+            addView(TextView(context).apply { text = "– MIN"; setTextColor(Color.YELLOW); textSize = 12f; setPadding(0, 0, 30, 0); setOnClickListener { fullMenu.visibility = View.GONE; miniMenu.visibility = View.VISIBLE; hudParams.width = WindowManager.LayoutParams.WRAP_CONTENT; windowManager.updateViewLayout(rootContainer, hudParams) } })
+            addView(TextView(context).apply { text = "× CLOSE"; setTextColor(Color.LTGRAY); textSize = 12f; setOnClickListener { stopSelf() } })
         }
-        
-        val btnParams = RelativeLayout.LayoutParams(
-            RelativeLayout.LayoutParams.WRAP_CONTENT,
-            RelativeLayout.LayoutParams.WRAP_CONTENT
-        ).apply { addRule(RelativeLayout.ALIGN_PARENT_END) }
-        
-        header.addView(titleText)
-        header.addView(btnLayout, btnParams)
-        
+        header.addView(TextView(this).apply { text = "PRIME GAME • DRAG TO MOVE"; setTextColor(Color.parseColor("#00E5FF")); textSize = 13f; typeface = Typeface.DEFAULT_BOLD })
+        header.addView(btnLayout, RelativeLayout.LayoutParams(RelativeLayout.LayoutParams.WRAP_CONTENT, RelativeLayout.LayoutParams.WRAP_CONTENT).apply { addRule(RelativeLayout.ALIGN_PARENT_END) })
         fullMenu.addView(header)
 
-        // Add Switches helper
         val addFeatureSwitch = { label: String, key: String ->
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                setPadding(0, 10, 0, 10)
-            }
-            val txt = TextView(this@CaptureOverlayService).apply {
-                text = label
-                setTextColor(Color.WHITE)
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            }
-            val switch = Switch(this@CaptureOverlayService).apply {
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 10, 0, 10) }
+            val txt = TextView(this).apply { text = label; setTextColor(Color.WHITE); layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f) }
+            val switch = Switch(this).apply {
                 isChecked = sharedPreferences.getBoolean(key, false)
                 setOnCheckedChangeListener { _, isChecked ->
                     sharedPreferences.edit().putBoolean(key, isChecked).apply()
                     if (key == "aim_pred") predictionCanvas?.isAimPredictionEnabled = isChecked
                     if (key == "coin_col") predictionCanvas?.isCollisionLinesEnabled = isChecked
-                    if (key == "auto_aim") {
-                        if(isChecked) Toast.makeText(this@CaptureOverlayService, "Auto Aim Ready (Visual Only)", Toast.LENGTH_SHORT).show()
+                    if (key == "auto_play") {
+                        if(isChecked && AutoPlayService.instance == null) {
+                            Toast.makeText(this@CaptureOverlayService, "Please Enable Accessibility Service in Settings", Toast.LENGTH_LONG).show()
+                            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
+                            this.isChecked = false
+                        } else if(isChecked) {
+                            Toast.makeText(this@CaptureOverlayService, "Auto Play Enabled! Hold aim to shoot.", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }
             }
-            row.addView(txt)
-            row.addView(switch)
-            fullMenu.addView(row)
+            row.addView(txt); row.addView(switch); fullMenu.addView(row)
         }
 
         addFeatureSwitch("Aim prediction", "aim_pred")
-        addFeatureSwitch("Auto aim assist", "auto_aim")
         addFeatureSwitch("Coin collision lines", "coin_col")
+        addFeatureSwitch("Auto Play (Bot)", "auto_play")
 
-        // Maximize action
-        miniMenu.setOnClickListener {
-            miniMenu.visibility = View.GONE
-            fullMenu.visibility = View.VISIBLE
-            hudParams.width = (screenWidth * 0.82f).toInt()
-            windowManager.updateViewLayout(rootContainer, hudParams)
-        }
+        miniMenu.setOnClickListener { miniMenu.visibility = View.GONE; fullMenu.visibility = View.VISIBLE; hudParams.width = (screenWidth * 0.82f).toInt(); windowManager.updateViewLayout(rootContainer, hudParams) }
+        rootContainer.addView(fullMenu); rootContainer.addView(miniMenu)
 
-        rootContainer.addView(fullMenu)
-        rootContainer.addView(miniMenu)
-
-        // Touch Listener for Dragging
         rootContainer.setOnTouchListener(object : View.OnTouchListener {
-            private var initialX = 0
-            private var initialY = 0
-            private var touchX = 0f
-            private var touchY = 0f
-
-            @SuppressLint("ClickableViewAccessibility")
+            private var initialX = 0; private var initialY = 0; private var touchX = 0f; private var touchY = 0f
             override fun onTouch(v: View?, event: MotionEvent?): Boolean {
                 if (event == null) return false
                 when (event.action) {
-                    MotionEvent.ACTION_DOWN -> {
-                        initialX = hudParams.x
-                        initialY = hudParams.y
-                        touchX = event.rawX
-                        touchY = event.rawY
-                        return true
-                    }
-                    MotionEvent.ACTION_MOVE -> {
-                        hudParams.x = initialX + (event.rawX - touchX).toInt()
-                        hudParams.y = initialY + (event.rawY - touchY).toInt()
-                        windowManager.updateViewLayout(rootContainer, hudParams)
-                        return true
-                    }
-                    MotionEvent.ACTION_UP -> {
-                        val diffX = abs(event.rawX - touchX)
-                        val diffY = abs(event.rawY - touchY)
-                        if (diffX < 10 && diffY < 10 && miniMenu.visibility == View.VISIBLE) {
-                            miniMenu.performClick()
-                        }
-                        return true
-                    }
+                    MotionEvent.ACTION_DOWN -> { initialX = hudParams.x; initialY = hudParams.y; touchX = event.rawX; touchY = event.rawY; return true }
+                    MotionEvent.ACTION_MOVE -> { hudParams.x = initialX + (event.rawX - touchX).toInt(); hudParams.y = initialY + (event.rawY - touchY).toInt(); windowManager.updateViewLayout(rootContainer, hudParams); return true }
+                    MotionEvent.ACTION_UP -> { if (abs(event.rawX - touchX) < 10 && abs(event.rawY - touchY) < 10 && miniMenu.visibility == View.VISIBLE) miniMenu.performClick(); return true }
                 }
                 return false
             }
         })
-
         hudRootView = rootContainer
         windowManager.addView(hudRootView, hudParams)
     }
 
     @SuppressLint("WrongConstant")
     private fun startScreenCapture() {
-        val captureWidth = screenWidth / 2
-        val captureHeight = screenHeight / 2
-        
+        val captureWidth = screenWidth / 2; val captureHeight = screenHeight / 2
         imageReader = ImageReader.newInstance(captureWidth, captureHeight, PixelFormat.RGBA_8888, 2)
-        virtualDisplay = mediaProjection?.createVirtualDisplay(
-            "Stream",
-            captureWidth,
-            captureHeight,
-            screenDensity,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            imageReader?.surface,
-            null,
-            mainHandler
-        )
+        virtualDisplay = mediaProjection?.createVirtualDisplay("Stream", captureWidth, captureHeight, screenDensity, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, imageReader?.surface, null, mainHandler)
 
         imageReader?.setOnImageAvailableListener({ reader ->
             val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
-            if (isProcessingFrame || predictionCanvas?.isAimPredictionEnabled != true) {
-                image.close()
-                return@setOnImageAvailableListener
-            }
+            if (isProcessingFrame || predictionCanvas?.isAimPredictionEnabled != true) { image.close(); return@setOnImageAvailableListener }
             isProcessingFrame = true
             
             Thread {
@@ -335,11 +173,7 @@ class CaptureOverlayService : Service() {
                     val rowStride = planes[0].rowStride
                     val rowPadding = rowStride - pixelStride * captureWidth
 
-                    bitmap = Bitmap.createBitmap(
-                        captureWidth + rowPadding / pixelStride,
-                        captureHeight,
-                        Bitmap.Config.ARGB_8888
-                    )
+                    bitmap = Bitmap.createBitmap(captureWidth + rowPadding / pixelStride, captureHeight, Bitmap.Config.ARGB_8888)
                     bitmap.copyPixelsFromBuffer(buffer)
                     image.close()
                     
@@ -347,14 +181,22 @@ class CaptureOverlayService : Service() {
                     
                     mainHandler.post {
                         if (result != null) {
-                            predictionCanvas?.updatePredictions(
-                                result.strikerTrajectory,
-                                result.coinTrajectory,
-                                result.collisionPoint,
-                                result.targetPocket
-                            )
+                            predictionCanvas?.updatePredictions(result.strikerTrajectory, result.coinTrajectory, result.collisionPoint, result.targetPocket)
+                            
+                            // Auto Play Logic
+                            if (sharedPreferences.getBoolean("auto_play", false) && result.hitCoinPt != null) {
+                                if (autoPlayLockTime == 0L) {
+                                    autoPlayLockTime = System.currentTimeMillis()
+                                } else if (System.currentTimeMillis() - autoPlayLockTime > 1200) { // Lock for 1.2 seconds before shooting
+                                    AutoPlayService.performShot(result.strikerTrajectory[0].x, result.strikerTrajectory[0].y, result.aimAngle, 450f)
+                                    autoPlayLockTime = 0L // Reset after shot
+                                }
+                            } else {
+                                autoPlayLockTime = 0L
+                            }
                         } else {
                             predictionCanvas?.clearPredictions()
+                            autoPlayLockTime = 0L
                         }
                     }
                 } catch (e: Throwable) {
@@ -369,12 +211,8 @@ class CaptureOverlayService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        hudRootView?.let {
-            try { windowManager.removeView(it) } catch (e: Exception) {}
-        }
-        predictionCanvas?.let {
-            try { windowManager.removeView(it) } catch (e: Exception) {}
-        }
+        hudRootView?.let { try { windowManager.removeView(it) } catch (e: Exception) {} }
+        predictionCanvas?.let { try { windowManager.removeView(it) } catch (e: Exception) {} }
         virtualDisplay?.release()
         imageReader?.close()
         mediaProjection?.stop()
