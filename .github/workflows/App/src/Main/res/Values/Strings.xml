@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">PRIME GAME</string>
+    <string name="notification_channel">PRIME GAME capture</string>
+</resources>
