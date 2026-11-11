@@ -1,0 +1,48 @@
+
+name: Build PRIME GAME APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Find Android project
+        run: |
+          FILE=$(find . -name settings.gradle -o -name settings.gradle.kts | head -n 1)
+          if [ -z "$FILE" ]; then
+            echo "ERROR: settings.gradle not found"
+            exit 1
+          fi
+          DIR=$(dirname "$FILE")
+          echo "PROJECT_DIR=$DIR" >> $GITHUB_ENV
+          echo "Found project: $DIR"
+
+      - name: Build debug APK
+        run: |
+          cd "$PROJECT_DIR"
+          gradle --no-daemon assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: prime-game-debug-apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          
