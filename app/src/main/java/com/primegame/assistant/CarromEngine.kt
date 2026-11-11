@@ -15,7 +15,6 @@ class CarromEngine {
         val targetPocket: PointF?
     )
 
-    // Analyze screenshot bitmap to detect the striker arrow and calculate bounce lines
     fun processFrame(bitmap: Bitmap, screenWidth: Int, screenHeight: Int): AnalysisResult? {
         val boardSize = screenWidth.toFloat()
         val boardTop = (screenHeight - boardSize) / 2f
@@ -29,18 +28,15 @@ class CarromEngine {
             PointF(boardRect.right - 50f, boardRect.bottom - 50f)
         )
 
-        // Find the striker position and aiming angle by sampling the baseline region
         val aimData = detectStrikerAim(bitmap, boardRect) ?: return null
         val (origin, angleRad) = aimData
 
-        // Calculate Striker Raycast with Wall Bounces
         val strikerPath = mutableListOf<PointF>()
         strikerPath.add(origin)
 
         var currentPos = PointF(origin.x, origin.y)
         var currentAngle = angleRad
         var remainingDist = 1200f
-        var hitPoint: PointF? = null
 
         for (bounce in 0..2) {
             val stepX = cos(currentAngle)
@@ -56,7 +52,6 @@ class CarromEngine {
                 remainingDist -= segDist
                 currentPos = nextHit
                 
-                // Reflect on collision with board walls
                 if (nextHit.x <= boardRect.left + 35f || nextHit.x >= boardRect.right - 35f) {
                     currentAngle = PI.toFloat() - currentAngle
                 } else {
@@ -65,7 +60,6 @@ class CarromEngine {
             }
         }
 
-        // Calculate closest pocket towards angle
         val targetPocket = pockets.minByOrNull { hypot(it.x - strikerPath.last().x, it.y - strikerPath.last().y) }
 
         return AnalysisResult(
@@ -84,7 +78,6 @@ class CarromEngine {
         var arrowY = 0f
         var count = 0
 
-        // Detect high-saturation red/orange arrow guide rendered by the game
         val step = 4
         for (y in scanYStart until scanYEnd step step) {
             for (x in 20 until bitmap.width - 20 step step) {
@@ -93,7 +86,6 @@ class CarromEngine {
                 val g = Color.green(pixel)
                 val b = Color.blue(pixel)
 
-                // Filter for Carrom Pool orange/red arrow pixels
                 if (r > 200 && g in 40..140 && b < 50) {
                     arrowX += x
                     arrowY += y
@@ -105,7 +97,6 @@ class CarromEngine {
         if (count < 15) return null
 
         val detectedCenter = PointF(arrowX / count, arrowY / count)
-        // Aiming direction points upwards towards board center
         val targetCenter = PointF(board.centerX(), board.centerY())
         val angle = atan2(targetCenter.y - detectedCenter.y, targetCenter.x - detectedCenter.x)
 
