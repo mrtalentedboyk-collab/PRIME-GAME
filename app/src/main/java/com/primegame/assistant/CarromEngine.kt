@@ -22,7 +22,7 @@ class CarromEngine {
         val boardSize = screenWidth.toFloat()
         val boardTop = (screenHeight - boardSize) / 2f
         val boardBottom = boardTop + boardSize
-        val boardRect = RectF(40f, boardTop + 40f, screenWidth - 40f, boardBottom - 40f)
+        val boardRect = RectF(45f, boardTop + 45f, screenWidth - 45f, boardBottom - 45f)
 
         val pockets = listOf(
             PointF(boardRect.left + 35f, boardRect.top + 35f),
@@ -31,22 +31,22 @@ class CarromEngine {
             PointF(boardRect.right - 35f, boardRect.bottom - 35f)
         )
 
-        // 1. Detect Striker and Aim Vector from scaled frame
+        // 1. Detect Striker and Aim Vector (Strictly in the baseline control area)
         val aim = detectAimVector(bitmap, scaleX, scaleY, boardRect) ?: return null
         val (strikerCenter, angleRad) = aim
 
-        // 2. Generate Multi-line Striker Raycast
+        // 2. Striker Raycast Trajectory
         val strikerPath = mutableListOf<PointF>()
         strikerPath.add(strikerCenter)
 
         var cur = PointF(strikerCenter.x, strikerCenter.y)
         var curAngle = angleRad
-        var remainingDist = 2500f
+        var remainingDist = 2000f
         var hitPoint: PointF? = null
         val coinPath = mutableListOf<PointF>()
         var bestPocket: PointF? = null
 
-        for (bounce in 0..3) {
+        for (bounce in 0..2) {
             val dirX = cos(curAngle)
             val dirY = sin(curAngle)
             val nextHit = calculateWallHit(cur, dirX, dirY, boardRect)
@@ -60,7 +60,7 @@ class CarromEngine {
                 remainingDist -= segDist
                 cur = nextHit
 
-                // Bounce angle inversion
+                // Wall reflection
                 if (nextHit.x <= boardRect.left + 5f || nextHit.x >= boardRect.right - 5f) {
                     curAngle = PI.toFloat() - curAngle
                 } else {
@@ -69,7 +69,7 @@ class CarromEngine {
             }
         }
 
-        // 3. Collision Point & Pocket Path
+        // 3. Multi-line Collision Point & Target Pocket Raycast
         if (strikerPath.size > 1) {
             hitPoint = strikerPath[1]
             bestPocket = pockets.minByOrNull { hypot(it.x - hitPoint.x, it.y - hitPoint.y) }
@@ -96,50 +96,35 @@ class CarromEngine {
         val bmpW = bitmap.width
         val bmpH = bitmap.height
 
-        // Area where striker baseline exists
-        val startY = (bmpH * 0.50f).toInt().coerceIn(0, bmpH - 1)
-        val endY = (bmpH * 0.78f).toInt().coerceIn(0, bmpH - 1)
+        // Scan exclusively around the player's lower striker baseline (exclude board center)
+        val startY = (bmpH * 0.58f).toInt().coerceIn(0, bmpH - 1)
+        val endY = (bmpH * 0.74f).toInt().coerceIn(0, bmpH - 1)
 
         var arrowHeadX = 0f
         var arrowHeadY = 0f
-        var arrowHeadCount = 0
-
-        var arrowTailX = 0f
-        var arrowTailY = 0f
-        var arrowTailCount = 0
+        var arrowCount = 0
 
         val step = 3
         for (y in startY until endY step step) {
-            for (x in 10 until bmpW - 10 step step) {
+            for (x in 20 until bmpW - 20 step step) {
                 val p = bitmap.getPixel(x, y)
                 val r = Color.red(p)
                 val g = Color.green(p)
                 val b = Color.blue(p)
 
-                // Detect Red Arrow Head
-                if (r > 190 && g < 75 && b < 75) {
+                // Precise Carrom Pool Aim Arrow Head Color (Intense Red/Orange tip)
+                if (r > 215 && g in 20..90 && b < 50) {
                     arrowHeadX += x
                     arrowHeadY += y
-                    arrowHeadCount++
-                }
-                // Detect Yellow/Orange Body of Arrow
-                else if (r > 200 && g in 100..200 && b < 60) {
-                    arrowTailX += x
-                    arrowTailY += y
-                    arrowTailCount++
+                    arrowCount++
                 }
             }
         }
 
-        // Validate detected guide arrow
-        if (arrowHeadCount < 6 && arrowTailCount < 6) return null
+        // Require a solid cluster of arrow pixels to prevent false center-board detection
+        if (arrowCount < 14) return null
 
-        val headPt = if (arrowHeadCount >= 6) {
-            PointF((arrowHeadX / arrowHeadCount) * scaleX, (arrowHeadY / arrowHeadCount) * scaleY)
-        } else {
-            PointF((arrowTailX / arrowTailCount) * scaleX, (arrowTailY / arrowTailCount) * scaleY)
-        }
-
+        val headPt = PointF((arrowHeadX / arrowCount) * scaleX, (arrowHeadY / arrowCount) * scaleY)
         val baseStrikerY = board.bottom - (board.height() * 0.22f)
         val strikerOrigin = PointF(headPt.x, baseStrikerY)
 
