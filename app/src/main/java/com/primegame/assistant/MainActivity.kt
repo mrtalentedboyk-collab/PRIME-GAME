@@ -16,36 +16,14 @@ import android.widget.LinearLayout
 import android.widget.Space
 import android.widget.TextView
 import android.widget.Toast
-import androidx.activity.ComponentActivity
-import androidx.activity.result.contract.ActivityResultContracts
 
-class MainActivity : ComponentActivity() {
+class MainActivity : Activity() {
 
     private lateinit var projectionManager: MediaProjectionManager
 
-    private val overlayPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) {
-        checkAndRequestMediaProjection()
-    }
-
-    private val mediaProjectionLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
-            val serviceIntent = Intent(this, CaptureOverlayService::class.java).apply {
-                putExtra(CaptureOverlayService.EXTRA_RESULT_CODE, result.resultCode)
-                putExtra(CaptureOverlayService.EXTRA_RESULT_DATA, result.data)
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent)
-            } else {
-                startService(serviceIntent)
-            }
-            Toast.makeText(this, "PRIME GAME HUD Started!", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(this, "Screen capture permission required", Toast.LENGTH_SHORT).show()
-        }
+    companion object {
+        private const val REQUEST_OVERLAY_PERMISSION = 1001
+        private const val REQUEST_MEDIA_PROJECTION = 1002
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -95,14 +73,49 @@ class MainActivity : ComponentActivity() {
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                 Uri.parse("package:$packageName")
             )
-            overlayPermissionLauncher.launch(intent)
+            @Suppress("DEPRECATION")
+            startActivityForResult(intent, REQUEST_OVERLAY_PERMISSION)
         } else {
-            checkAndRequestMediaProjection()
+            requestMediaProjection()
         }
     }
 
-    private fun checkAndRequestMediaProjection() {
-        mediaProjectionLauncher.launch(projectionManager.createScreenCaptureIntent())
+    private fun requestMediaProjection() {
+        val captureIntent = projectionManager.createScreenCaptureIntent()
+        @Suppress("DEPRECATION")
+        startActivityForResult(captureIntent, REQUEST_MEDIA_PROJECTION)
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+
+        when (requestCode) {
+            REQUEST_OVERLAY_PERMISSION -> {
+                if (Settings.canDrawOverlays(this)) {
+                    requestMediaProjection()
+                } else {
+                    Toast.makeText(this, "Overlay permission is required", Toast.LENGTH_SHORT).show()
+                }
+            }
+            REQUEST_MEDIA_PROJECTION -> {
+                if (resultCode == RESULT_OK && data != null) {
+                    val serviceIntent = Intent(this, CaptureOverlayService::class.java).apply {
+                        putExtra(CaptureOverlayService.EXTRA_RESULT_CODE, resultCode)
+                        putExtra(CaptureOverlayService.EXTRA_RESULT_DATA, data)
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(serviceIntent)
+                    } else {
+                        startService(serviceIntent)
+                    }
+                    Toast.makeText(this, "PRIME GAME HUD Started!", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this, "Screen capture permission required", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
 
     private fun launchCarromPool() {
