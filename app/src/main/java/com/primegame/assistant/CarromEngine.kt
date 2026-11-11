@@ -15,14 +15,13 @@ class CarromEngine {
         val targetPocket: PointF?
     )
 
+    private var lastAngle = 0f
+    private var lastStrikerCenter = PointF()
+
     fun processFrame(bitmap: Bitmap, screenWidth: Int, screenHeight: Int): AnalysisResult? {
         val scaleX = screenWidth.toFloat() / bitmap.width.toFloat()
         val scaleY = screenHeight.toFloat() / bitmap.height.toFloat()
-
-        val boardSize = screenWidth.toFloat()
-        val boardTop = (screenHeight - boardSize) / 2f
-        val boardBottom = boardTop + boardSize
-        val boardRect = RectF(45f, boardTop + 45f, screenWidth - 45f, boardBottom - 45f)
+        val boardRect = RectF(45f, (screenHeight - screenWidth) / 2f + 45f, screenWidth - 45f, (screenHeight + screenWidth) / 2f - 45f)
 
         val pockets = listOf(
             PointF(boardRect.left + 35f, boardRect.top + 35f),
@@ -31,127 +30,96 @@ class CarromEngine {
             PointF(boardRect.right - 35f, boardRect.bottom - 35f)
         )
 
-        // 1. Detect Striker and Aim Vector (Strictly in the baseline control area)
+        // 1. Detect Aim
         val aim = detectAimVector(bitmap, scaleX, scaleY, boardRect) ?: return null
-        val (strikerCenter, angleRad) = aim
+        var (strikerCenter, angleRad) = aim
 
-        // 2. Striker Raycast Trajectory
+        // ** ANTI-GLITCH SMOOTHING **
+        if (lastAngle != 0f && abs(angleRad - lastAngle) < 0.2f) {
+            angleRad = lastAngle * 0.75f + angleRad * 0.25f // Smooth jitter
+        }
+        lastAngle = angleRad
+
+        // 2. Physics Raycast (Check for coins in path)
         val strikerPath = mutableListOf<PointF>()
         strikerPath.add(strikerCenter)
 
-        var cur = PointF(strikerCenter.x, strikerCenter.y)
-        var curAngle = angleRad
-        var remainingDist = 2000f
-        var hitPoint: PointF? = null
+        var hitCoinPt: PointF? = null
+        var stepX = cos(angleRad) * 6f
+        var stepY = sin(angleRad) * 6f
+        
+        var testX = strikerCenter.x / scaleX
+        var testY = strikerCenter.y / scaleY
+        var hitPixels = 0
+
+        // Scan pixels along the path to find Black or White coins
+        for (i in 0..150) {
+            testX += (stepX / scaleX)
+            testY += (stepY / scaleY)
+            if (testX < 10 || testY < 10 || testX > bitmap.width - 10 || testY > bitmap.height - 10) break
+            
+            val p = bitmap.getPixel(testX.toInt(), testY.toInt())
+            val r = Color.red(p); val g = Color.green(p); val b = Color.blue(p)
+            
+            // Check for Black/White coin color (different from wooden board)
+            if ((r < 70 && g < 70 && b < 70) || (r > 200 && g > 200 && b > 200)) {
+                hitPixels++
+                if (hitPixels >= 2) { // Confirm it's a coin, not noise
+                    hitCoinPt = PointF(testX * scaleX, testY * scaleY)
+                    break
+                }
+            }
+        }
+
         val coinPath = mutableListOf<PointF>()
         var bestPocket: PointF? = null
 
-        for (bounce in 0..2) {
-            val dirX = cos(curAngle)
-            val dirY = sin(curAngle)
-            val nextHit = calculateWallHit(cur, dirX, dirY, boardRect)
-
-            val segDist = hypot(nextHit.x - cur.x, nextHit.y - cur.y)
-            if (segDist >= remainingDist) {
-                strikerPath.add(PointF(cur.x + dirX * remainingDist, cur.y + dirY * remainingDist))
-                break
-            } else {
-                strikerPath.add(nextHit)
-                remainingDist -= segDist
-                cur = nextHit
-
-                // Wall reflection
-                if (nextHit.x <= boardRect.left + 5f || nextHit.x >= boardRect.right - 5f) {
-                    curAngle = PI.toFloat() - curAngle
-                } else {
-                    curAngle = -curAngle
-                }
-            }
-        }
-
-        // 3. Multi-line Collision Point & Target Pocket Raycast
-        if (strikerPath.size > 1) {
-            hitPoint = strikerPath[1]
-            bestPocket = pockets.minByOrNull { hypot(it.x - hitPoint.x, it.y - hitPoint.y) }
+        if (hitCoinPt != null) {
+            // A coin was hit! Stop striker line here.
+            strikerPath.add(hitCoinPt)
+            
+            // Coin path goes towards the pocket that aligns with impact momentum
+            bestPocket = pockets.minByOrNull { hypot(it.x - hitCoinPt.x, it.y - hitCoinPt.y) }
             bestPocket?.let {
-                coinPath.add(hitPoint)
+                coinPath.add(hitCoinPt)
                 coinPath.add(it)
             }
+        } else {
+            // No coin hit, just bounce off the wall
+            val wallHit = calculateWallHit(strikerCenter, cos(angleRad), sin(angleRad), boardRect)
+            strikerPath.add(wallHit)
+            
+            var bounceAngle = if (wallHit.x <= boardRect.left + 5f || wallHit.x >= boardRect.right - 5f) PI.toFloat() - angleRad else -angleRad
+            val bounceHit = calculateWallHit(wallHit, cos(bounceAngle), sin(bounceAngle), boardRect)
+            strikerPath.add(bounceHit)
         }
 
-        return AnalysisResult(
-            strikerTrajectory = strikerPath,
-            coinTrajectory = coinPath,
-            collisionPoint = hitPoint,
-            targetPocket = bestPocket
-        )
+        return AnalysisResult(strikerPath, coinPath, hitCoinPt, bestPocket)
     }
 
-    private fun detectAimVector(
-        bitmap: Bitmap,
-        scaleX: Float,
-        scaleY: Float,
-        board: RectF
-    ): Pair<PointF, Float>? {
-        val bmpW = bitmap.width
-        val bmpH = bitmap.height
+    private fun detectAimVector(bitmap: Bitmap, scaleX: Float, scaleY: Float, board: RectF): Pair<PointF, Float>? {
+        val startY = (bitmap.height * 0.58f).toInt(); val endY = (bitmap.height * 0.74f).toInt()
+        var ax = 0f; var ay = 0f; var count = 0
 
-        // Scan exclusively around the player's lower striker baseline (exclude board center)
-        val startY = (bmpH * 0.58f).toInt().coerceIn(0, bmpH - 1)
-        val endY = (bmpH * 0.74f).toInt().coerceIn(0, bmpH - 1)
-
-        var arrowHeadX = 0f
-        var arrowHeadY = 0f
-        var arrowCount = 0
-
-        val step = 3
-        for (y in startY until endY step step) {
-            for (x in 20 until bmpW - 20 step step) {
+        for (y in startY until endY step 3) {
+            for (x in 20 until bitmap.width - 20 step 3) {
                 val p = bitmap.getPixel(x, y)
-                val r = Color.red(p)
-                val g = Color.green(p)
-                val b = Color.blue(p)
-
-                // Precise Carrom Pool Aim Arrow Head Color (Intense Red/Orange tip)
-                if (r > 215 && g in 20..90 && b < 50) {
-                    arrowHeadX += x
-                    arrowHeadY += y
-                    arrowCount++
+                if (Color.red(p) > 215 && Color.green(p) in 20..90 && Color.blue(p) < 50) {
+                    ax += x; ay += y; count++
                 }
             }
         }
+        if (count < 14) return null
 
-        // Require a solid cluster of arrow pixels to prevent false center-board detection
-        if (arrowCount < 14) return null
-
-        val headPt = PointF((arrowHeadX / arrowCount) * scaleX, (arrowHeadY / arrowCount) * scaleY)
-        val baseStrikerY = board.bottom - (board.height() * 0.22f)
-        val strikerOrigin = PointF(headPt.x, baseStrikerY)
-
-        val angle = atan2(headPt.y - strikerOrigin.y, headPt.x - strikerOrigin.x)
-
-        return Pair(strikerOrigin, angle)
+        val headPt = PointF((ax / count) * scaleX, (ay / count) * scaleY)
+        val strikerOrigin = PointF(headPt.x, board.bottom - (board.height() * 0.22f))
+        return Pair(strikerOrigin, atan2(headPt.y - strikerOrigin.y, headPt.x - strikerOrigin.x))
     }
 
     private fun calculateWallHit(origin: PointF, dirX: Float, dirY: Float, board: RectF): PointF {
         var minT = Float.MAX_VALUE
-
-        if (dirX > 0) {
-            val t = (board.right - origin.x) / dirX
-            if (t > 0 && t < minT) minT = t
-        } else if (dirX < 0) {
-            val t = (board.left - origin.x) / dirX
-            if (t > 0 && t < minT) minT = t
-        }
-
-        if (dirY > 0) {
-            val t = (board.bottom - origin.y) / dirY
-            if (t > 0 && t < minT) minT = t
-        } else if (dirY < 0) {
-            val t = (board.top - origin.y) / dirY
-            if (t > 0 && t < minT) minT = t
-        }
-
+        if (dirX > 0) minT = minOf(minT, (board.right - origin.x) / dirX) else if (dirX < 0) minT = minOf(minT, (board.left - origin.x) / dirX)
+        if (dirY > 0) minT = minOf(minT, (board.bottom - origin.y) / dirY) else if (dirY < 0) minT = minOf(minT, (board.top - origin.y) / dirY)
         return PointF(origin.x + dirX * minT, origin.y + dirY * minT)
     }
 }
