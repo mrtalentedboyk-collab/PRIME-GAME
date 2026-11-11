@@ -8,12 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import android.view.Gravity
-import android.view.View
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
+import android.widget.*
 import android.graphics.Color
 
 class MainActivity : Activity() {
@@ -23,99 +18,138 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        projectionManager = getSystemService(
+            Context.MEDIA_PROJECTION_SERVICE
+        ) as MediaProjectionManager
         render()
     }
 
     private fun render() {
-        val scroll = ScrollView(this)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(28, 38, 28, 28)
             setBackgroundColor(Color.rgb(9, 7, 17))
         }
+
+        val scroll = ScrollView(this)
         scroll.addView(root)
-        fun text(value: String, size: Float, color: Int, bold: Boolean = false): TextView {
-            return TextView(this).apply {
+
+        fun addText(value: String, size: Float, color: Int) {
+            root.addView(TextView(this).apply {
                 text = value
                 textSize = size
                 setTextColor(color)
-                if (bold) setTypeface(null, android.graphics.Typeface.BOLD)
-                setPadding(0, 9, 0, 9)
-            }
+                setPadding(0, 10, 0, 10)
+            })
         }
-        root.addView(text("PRIME GAME", 26f, Color.rgb(255, 215, 0), true))
-        root.addView(text("LIVE SCREEN COMPANION", 11f, Color.LTGRAY, true))
-        root.addView(text(
-            "This native build can request Android screen capture and display a floating control panel. Live board recognition and reliable multi-coin physics prediction are not implemented in this build.",
-            14f, Color.rgb(205, 199, 214)
-        ))
-        status = text("STATUS: READY", 13f, Color.rgb(255, 215, 0), true)
+
+        addText("PRIME GAME", 28f, Color.rgb(180, 65, 255))
+        addText("CARROM AIM COMPANION", 15f, Color.WHITE)
+
+        status = TextView(this).apply {
+            text = "STATUS: READY"
+            textSize = 14f
+            setTextColor(Color.YELLOW)
+        }
         root.addView(status)
 
-        val overlay = makeButton("GRANT DISPLAY OVER OTHER APPS") {
-            if (!Settings.canDrawOverlays(this)) {
-                startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:$packageName")))
-            } else status.text = "STATUS: OVERLAY PERMISSION GRANTED"
+        fun addButton(label: String, action: () -> Unit) {
+            root.addView(Button(this).apply {
+                text = label
+                isAllCaps = false
+                setOnClickListener { action() }
+            })
         }
-        root.addView(overlay)
 
-        root.addView(makeButton("START SCREEN CAPTURE & FLOATING HUD") {
+        addButton("GRANT DISPLAY OVER OTHER APPS") {
             if (!Settings.canDrawOverlays(this)) {
-                status.text = "Grant overlay permission first."
-                startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:$packageName")))
+                startActivity(
+                    Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:$packageName")
+                    )
+                )
             } else {
-                startActivityForResult(projectionManager.createScreenCaptureIntent(), captureRequest)
+                status.text = "OVERLAY PERMISSION GRANTED"
             }
-        })
-        root.addView(makeButton("LAUNCH CARROM POOL") {
-            val launch = packageManager.getLaunchIntentForPackage("com.miniclip.carrompool")
-            if (launch != null) startActivity(launch)
-            else status.text = "Carrom Pool is not installed."
-        })
-        root.addView(makeButton("STOP PRIME GAME HUD") {
+        }
+
+        addButton("START SCREEN CAPTURE & FLOATING HUD") {
+            if (!Settings.canDrawOverlays(this)) {
+                status.text = "GRANT OVERLAY PERMISSION FIRST"
+                startActivity(
+                    Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:$packageName")
+                    )
+                )
+            } else {
+                startActivityForResult(
+                    projectionManager.createScreenCaptureIntent(),
+                    captureRequest
+                )
+            }
+        }
+
+        addButton("LAUNCH CARROM POOL") {
+            val gamePackage = "com.miniclip.carrom"
+            val launch = packageManager.getLaunchIntentForPackage(gamePackage)
+
+            if (launch != null) {
+                startActivity(launch)
+            } else {
+                status.text = "GAME NOT FOUND - INSTALL CARROM POOL"
+            }
+        }
+
+        addButton("STOP PRIME GAME HUD") {
             stopService(Intent(this, CaptureOverlayService::class.java))
             status.text = "STATUS: STOPPED"
-        })
-        root.addView(text(
-            "Important: Android displays a screen-capture consent prompt. Capture can be stopped from the Android system privacy indicator or the PRIME GAME notification. The overlay does not inject touches or alter the game.",
-            12f, Color.rgb(160, 153, 171)
-        ))
+        }
+
+        addText(
+            "Live coin detection and aim prediction are not implemented yet.",
+            13f,
+            Color.LTGRAY
+        )
+
         setContentView(scroll)
     }
 
-    private fun makeButton(label: String, action: () -> Unit): Button {
-        return Button(this).apply {
-            text = label
-            isAllCaps = false
-            setTextColor(Color.BLACK)
-            setBackgroundColor(Color.rgb(255, 215, 0))
-            setPadding(12, 8, 12, 8)
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            lp.setMargins(0, 12, 0, 4)
-            layoutParams = lp
-            setOnClickListener { action() }
-        }
-    }
-
-    @Deprecated("Deprecated in Android API; retained for broad device compatibility")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+    @Deprecated("Deprecated API")
+    override fun onActivityResult(
+        requestCode: Int,
+        resultCode: Int,
+        data: Intent?
+    ) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == captureRequest && resultCode == RESULT_OK && data != null) {
-            val service = Intent(this, CaptureOverlayService::class.java).apply {
-                putExtra(CaptureOverlayService.EXTRA_RESULT_CODE, resultCode)
-                putExtra(CaptureOverlayService.EXTRA_RESULT_DATA, data)
+
+        if (requestCode == captureRequest &&
+            resultCode == RESULT_OK && data != null
+        ) {
+            val service = Intent(
+                this,
+                CaptureOverlayService::class.java
+            ).apply {
+                putExtra(
+                    CaptureOverlayService.EXTRA_RESULT_CODE,
+                    resultCode
+                )
+                putExtra(
+                    CaptureOverlayService.EXTRA_RESULT_DATA,
+                    data
+                )
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(service)
-            else startService(service)
-            status.text = "STATUS: CAPTURE START REQUESTED"
-        } else if (requestCode == captureRequest) {
-            status.text = "STATUS: SCREEN CAPTURE CANCELLED"
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(service)
+            } else {
+                startService(service)
+            }
+
+            status.text = "SCREEN CAPTURE STARTED"
+        } else {
+            status.text = "SCREEN CAPTURE CANCELLED"
         }
     }
 }
