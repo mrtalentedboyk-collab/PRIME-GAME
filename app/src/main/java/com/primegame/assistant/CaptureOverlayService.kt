@@ -1,4 +1,3 @@
-// [আগের ইমপোর্ট গুলো ঠিক রাখবেন]
 package com.primegame.assistant
 
 import android.annotation.SuppressLint
@@ -19,6 +18,7 @@ import android.os.Looper
 import android.util.DisplayMetrics
 import android.view.*
 import android.widget.*
+import kotlin.math.abs
 
 class CaptureOverlayService : Service() {
     private lateinit var windowManager: WindowManager
@@ -85,14 +85,12 @@ class CaptureOverlayService : Service() {
 
         val rootContainer = FrameLayout(this)
 
-        // 1. Full Menu View
         val fullMenu = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(32, 24, 32, 24)
             background = GradientDrawable().apply { setColor(Color.parseColor("#E60D131A")); cornerRadius = 24f; setStroke(2, Color.parseColor("#00E5FF")) }
         }
 
-        // 2. Minimized View (Floating Icon)
         val miniMenu = TextView(this).apply {
             text = " PRIME "
             setTextColor(Color.BLACK)
@@ -141,49 +139,4 @@ class CaptureOverlayService : Service() {
         rootContainer.addView(miniMenu)
 
         rootContainer.setOnTouchListener(object : View.OnTouchListener {
-            var initialX = 0; var initialY = 0; var touchX = 0f; var touchY = 0f
-            override fun onTouch(v: View, event: MotionEvent): Boolean {
-                when (event.action) {
-                    MotionEvent.ACTION_DOWN -> { initialX = hudParams.x; initialY = hudParams.y; touchX = event.rawX; touchY = event.rawY; return true }
-                    MotionEvent.ACTION_MOVE -> { hudParams.x = initialX + (event.rawX - touchX).toInt(); hudParams.y = initialY + (event.rawY - touchY).toInt(); windowManager.updateViewLayout(rootContainer, hudParams); return true }
-                    MotionEvent.ACTION_UP -> { if (abs(event.rawX - touchX) < 10 && abs(event.rawY - touchY) < 10 && miniMenu.visibility == View.VISIBLE) miniMenu.performClick() }
-                }
-                return false
-            }
-        })
-
-        hudRootView = rootContainer
-        windowManager.addView(hudRootView, hudParams)
-    }
-
-    @SuppressLint("WrongConstant")
-    private fun startScreenCapture() {
-        val captureWidth = screenWidth / 2; val captureHeight = screenHeight / 2
-        imageReader = ImageReader.newInstance(captureWidth, captureHeight, PixelFormat.RGBA_8888, 2)
-        virtualDisplay = mediaProjection?.createVirtualDisplay("Stream", captureWidth, captureHeight, screenDensity, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, imageReader?.surface, null, mainHandler)
-
-        imageReader?.setOnImageAvailableListener({ reader ->
-            val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
-            if (isProcessingFrame || predictionCanvas?.isAimPredictionEnabled != true) { image.close(); return@setOnImageAvailableListener }
-            isProcessingFrame = true
-            Thread {
-                var bitmap: Bitmap? = null
-                try {
-                    val buffer = image.planes[0].buffer
-                    bitmap = Bitmap.createBitmap(captureWidth + (image.planes[0].rowStride - image.planes[0].pixelStride * captureWidth) / image.planes[0].pixelStride, captureHeight, Bitmap.Config.ARGB_8888)
-                    bitmap.copyPixelsFromBuffer(buffer); image.close()
-                    val result = carromEngine.processFrame(bitmap, screenWidth, screenHeight)
-                    mainHandler.post {
-                        if (result != null) predictionCanvas?.updatePredictions(result.strikerTrajectory, result.coinTrajectory, result.collisionPoint, result.targetPocket) else predictionCanvas?.clearPredictions()
-                    }
-                } catch (e: Throwable) { try { image.close() } catch (e: Throwable) {} } finally { bitmap?.recycle(); isProcessingFrame = false }
-            }.start()
-        }, mainHandler)
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        hudRootView?.let { windowManager.removeView(it) }; predictionCanvas?.let { windowManager.removeView(it) }
-        virtualDisplay?.release(); imageReader?.close(); mediaProjection?.stop()
-    }
-}
+            var initialX = 0; var initialY = 0; var touchX = 0f;
