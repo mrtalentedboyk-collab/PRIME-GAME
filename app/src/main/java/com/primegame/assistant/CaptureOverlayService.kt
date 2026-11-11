@@ -73,6 +73,7 @@ class CaptureOverlayService : Service() {
         
         val notification = builder
             .setContentTitle("PRIME GAME Active")
+            .setContentText("Aim Prediction Engine Running")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .build()
             
@@ -173,17 +174,17 @@ class CaptureOverlayService : Service() {
         // Header Layout
         val header = RelativeLayout(this)
         
-        val titleText = TextView(context).apply {
+        val titleText = TextView(this@CaptureOverlayService).apply {
             text = "PRIME GAME • DRAG TO MOVE"
             setTextColor(Color.parseColor("#00E5FF"))
             textSize = 13f
             typeface = Typeface.DEFAULT_BOLD
         }
         
-        val btnLayout = LinearLayout(context).apply {
+        val btnLayout = LinearLayout(this@CaptureOverlayService).apply {
             orientation = LinearLayout.HORIZONTAL
             
-            val minBtn = TextView(context).apply {
+            val minBtn = TextView(this@CaptureOverlayService).apply {
                 text = "– MIN"
                 setTextColor(Color.YELLOW)
                 textSize = 12f
@@ -196,7 +197,7 @@ class CaptureOverlayService : Service() {
                 }
             }
             
-            val closeBtn = TextView(context).apply {
+            val closeBtn = TextView(this@CaptureOverlayService).apply {
                 text = "× CLOSE"
                 setTextColor(Color.LTGRAY)
                 textSize = 12f
@@ -223,17 +224,20 @@ class CaptureOverlayService : Service() {
                 orientation = LinearLayout.HORIZONTAL
                 setPadding(0, 10, 0, 10)
             }
-            val txt = TextView(this).apply {
+            val txt = TextView(this@CaptureOverlayService).apply {
                 text = label
                 setTextColor(Color.WHITE)
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             }
-            val switch = Switch(this).apply {
+            val switch = Switch(this@CaptureOverlayService).apply {
                 isChecked = sharedPreferences.getBoolean(key, false)
                 setOnCheckedChangeListener { _, isChecked ->
                     sharedPreferences.edit().putBoolean(key, isChecked).apply()
-                    predictionCanvas?.isAimPredictionEnabled = sharedPreferences.getBoolean("aim_pred", false)
-                    predictionCanvas?.isCollisionLinesEnabled = sharedPreferences.getBoolean("coin_col", false)
+                    if (key == "aim_pred") predictionCanvas?.isAimPredictionEnabled = isChecked
+                    if (key == "coin_col") predictionCanvas?.isCollisionLinesEnabled = isChecked
+                    if (key == "auto_aim") {
+                        if(isChecked) Toast.makeText(this@CaptureOverlayService, "Auto Aim Ready (Visual Only)", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
             row.addView(txt)
@@ -242,6 +246,7 @@ class CaptureOverlayService : Service() {
         }
 
         addFeatureSwitch("Aim prediction", "aim_pred")
+        addFeatureSwitch("Auto aim assist", "auto_aim")
         addFeatureSwitch("Coin collision lines", "coin_col")
 
         // Maximize action
