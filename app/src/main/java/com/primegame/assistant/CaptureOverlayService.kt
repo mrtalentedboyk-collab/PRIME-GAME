@@ -184,7 +184,8 @@ class CaptureOverlayService : Service() {
                             predictionCanvas?.updatePredictions(result.strikerTrajectory, result.coinTrajectory, result.collisionPoint, result.targetPocket)
                             
                             // Auto Play Logic
-                            if (sharedPreferences.getBoolean("auto_play", false) && result.hitCoinPt != null) {
+                            // *** ERROR FIXED HERE: hitCoinPt changed to collisionPoint ***
+                            if (sharedPreferences.getBoolean("auto_play", false) && result.collisionPoint != null) {
                                 if (autoPlayLockTime == 0L) {
                                     autoPlayLockTime = System.currentTimeMillis()
                                 } else if (System.currentTimeMillis() - autoPlayLockTime > 1200) { // Lock for 1.2 seconds before shooting
