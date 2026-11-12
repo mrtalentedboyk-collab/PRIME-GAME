@@ -56,19 +56,48 @@ class CaptureOverlayService : Service() {
     }
 
     private fun startForegroundServiceNotification() {
+        val channelId = "PrimeGameOverlayChannel"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            getSystemService(NotificationManager::class.java)?.createNotificationChannel(NotificationChannel("PrimeGameOverlayChannel", "HUD", NotificationManager.IMPORTANCE_LOW))
+            val channel = NotificationChannel(channelId, "PRIME GAME HUD", NotificationManager.IMPORTANCE_LOW).apply {
+                description = "Running overlay assistant"
+            }
+            getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
         }
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.Builder(this, "PrimeGameOverlayChannel") else @Suppress("DEPRECATION") Notification.Builder(this)
-        startForeground(2001, builder.setContentTitle("PRIME GAME Active").setSmallIcon(android.R.drawable.ic_menu_compass).build())
+
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, channelId)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+        }.setContentTitle("PRIME GAME Active")
+         .setContentText("Overlay and Bot running")
+         .setSmallIcon(android.R.drawable.ic_menu_compass)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(2001, builder.build(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+        } else {
+            startForeground(2001, builder.build())
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val resultCode = intent?.getIntExtra("RESULT_CODE", Activity.RESULT_CANCELED) ?: Activity.RESULT_CANCELED
         val resultData = intent?.getParcelableExtra<Intent>("RESULT_DATA")
+        
         if (resultCode == Activity.RESULT_OK && resultData != null && mediaProjection == null) {
-            mediaProjection = (getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager).getMediaProjection(resultCode, resultData)
-            startScreenCapture()
+            try {
+                val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                mediaProjection = projectionManager.getMediaProjection(resultCode, resultData)
+                mediaProjection?.registerCallback(object : MediaProjection.Callback() {
+                    override fun onStop() {
+                        super.onStop()
+                        stopSelf()
+                    }
+                }, mainHandler)
+                startScreenCapture()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
         return START_STICKY
     }
@@ -148,65 +177,69 @@ class CaptureOverlayService : Service() {
 
     @SuppressLint("WrongConstant")
     private fun startScreenCapture() {
+        if (mediaProjection == null) return
         val captureWidth = screenWidth / 2; val captureHeight = screenHeight / 2
-        imageReader = ImageReader.newInstance(captureWidth, captureHeight, PixelFormat.RGBA_8888, 2)
-        virtualDisplay = mediaProjection?.createVirtualDisplay("Stream", captureWidth, captureHeight, screenDensity, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, imageReader?.surface, null, mainHandler)
+        try {
+            imageReader = ImageReader.newInstance(captureWidth, captureHeight, PixelFormat.RGBA_8888, 2)
+            virtualDisplay = mediaProjection?.createVirtualDisplay("Stream", captureWidth, captureHeight, screenDensity, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, imageReader?.surface, null, mainHandler)
 
-        imageReader?.setOnImageAvailableListener({ reader ->
-            val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
-            val isAutoPlayOn = sharedPreferences.getBoolean("auto_play", false)
-            if (isProcessingFrame || (!predictionCanvas!!.isAimPredictionEnabled && !isAutoPlayOn && !predictionCanvas!!.isCollisionLinesEnabled)) { 
-                image.close(); return@setOnImageAvailableListener 
-            }
-            isProcessingFrame = true
-            
-            Thread {
-                var bitmap: Bitmap? = null
-                try {
-                    val buffer = image.planes[0].buffer
-                    val pixelStride = image.planes[0].pixelStride
-                    val rowStride = image.planes[0].rowStride
-                    val rowPadding = rowStride - pixelStride * captureWidth
+            imageReader?.setOnImageAvailableListener({ reader ->
+                val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
+                val isAutoPlayOn = sharedPreferences.getBoolean("auto_play", false)
+                if (isProcessingFrame || (!predictionCanvas!!.isAimPredictionEnabled && !isAutoPlayOn && !predictionCanvas!!.isCollisionLinesEnabled)) { 
+                    image.close(); return@setOnImageAvailableListener 
+                }
+                isProcessingFrame = true
+                
+                Thread {
+                    var bitmap: Bitmap? = null
+                    try {
+                        val buffer = image.planes[0].buffer
+                        val pixelStride = image.planes[0].pixelStride
+                        val rowStride = image.planes[0].rowStride
+                        val rowPadding = rowStride - pixelStride * captureWidth
 
-                    bitmap = Bitmap.createBitmap(captureWidth + rowPadding / pixelStride, captureHeight, Bitmap.Config.ARGB_8888)
-                    bitmap.copyPixelsFromBuffer(buffer)
-                    image.close()
-                    
-                    val result = carromEngine.processFrame(bitmap, captureWidth, captureHeight, isAutoPlayOn)
-                    
-                    mainHandler.post {
-                        if (result != null) {
-                            // Scale path back to full screen
-                            val scaleX = 2f; val scaleY = 2f
-                            val scaledStriker = result.strikerTrajectory.map { PointF(it.x * scaleX, it.y * scaleY) }
-                            val scaledTarget = result.targetCoinPath?.map { PointF(it.x * scaleX, it.y * scaleY) }
-                            val scaledCoins = result.allCoins.map { CarromEngine.Coin(PointF(it.pos.x * scaleX, it.pos.y * scaleY), it.isMine) }
+                        bitmap = Bitmap.createBitmap(captureWidth + rowPadding / pixelStride, captureHeight, Bitmap.Config.ARGB_8888)
+                        bitmap.copyPixelsFromBuffer(buffer)
+                        image.close()
+                        
+                        val result = carromEngine.processFrame(bitmap, captureWidth, captureHeight, isAutoPlayOn)
+                        
+                        mainHandler.post {
+                            if (result != null) {
+                                val scaleX = 2f; val scaleY = 2f
+                                val scaledStriker = result.strikerTrajectory.map { PointF(it.x * scaleX, it.y * scaleY) }
+                                val scaledTarget = result.targetCoinPath?.map { PointF(it.x * scaleX, it.y * scaleY) }
+                                val scaledCoins = result.allCoins.map { CarromEngine.Coin(PointF(it.pos.x * scaleX, it.pos.y * scaleY), it.isMine) }
 
-                            predictionCanvas?.updatePredictions(scaledStriker, scaledCoins, scaledTarget, null)
-                            
-                            if (isAutoPlayOn && result.isBotAiming && scaledStriker.isNotEmpty()) {
-                                if (autoPlayLockTime == 0L) {
-                                    autoPlayLockTime = System.currentTimeMillis()
-                                } else if (System.currentTimeMillis() - autoPlayLockTime > 1200) { 
-                                    AutoPlayService.performShot(scaledStriker[0].x, scaledStriker[0].y, result.aimAngle, 450f)
-                                    autoPlayLockTime = 0L 
+                                predictionCanvas?.updatePredictions(scaledStriker, scaledCoins, scaledTarget, null)
+                                
+                                if (isAutoPlayOn && result.isBotAiming && scaledStriker.isNotEmpty()) {
+                                    if (autoPlayLockTime == 0L) {
+                                        autoPlayLockTime = System.currentTimeMillis()
+                                    } else if (System.currentTimeMillis() - autoPlayLockTime > 1200) { 
+                                        AutoPlayService.performShot(scaledStriker[0].x, scaledStriker[0].y, result.aimAngle, 450f)
+                                        autoPlayLockTime = 0L 
+                                    }
+                                } else {
+                                    autoPlayLockTime = 0L
                                 }
                             } else {
+                                predictionCanvas?.clearPredictions()
                                 autoPlayLockTime = 0L
                             }
-                        } else {
-                            predictionCanvas?.clearPredictions()
-                            autoPlayLockTime = 0L
                         }
+                    } catch (e: Throwable) {
+                        try { image.close() } catch (ex: Throwable) {}
+                    } finally {
+                        bitmap?.recycle()
+                        isProcessingFrame = false
                     }
-                } catch (e: Throwable) {
-                    try { image.close() } catch (ex: Throwable) {}
-                } finally {
-                    bitmap?.recycle()
-                    isProcessingFrame = false
-                }
-            }.start()
-        }, mainHandler)
+                }.start()
+            }, mainHandler)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     override fun onDestroy() {
