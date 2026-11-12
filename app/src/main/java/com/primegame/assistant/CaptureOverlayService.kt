@@ -214,14 +214,16 @@ class CaptureOverlayService : Service() {
 
                                 predictionCanvas?.updatePredictions(scaledStriker, scaledCoins, scaledTarget, null)
                                 
+                                // অপনেন্ট নয়, শুধুমাত্র নিজের গুটি পকেটে ফেলার জন্য ম্যাচ উইন পর্যন্ত টানা অটো-প্লে লজিক
                                 if (isAutoPlayOn && result.isBotAiming && scaledStriker.isNotEmpty()) {
+                                    val currentTime = System.currentTimeMillis()
                                     if (autoPlayLockTime == 0L) {
-                                        autoPlayLockTime = System.currentTimeMillis()
-                                    } else if (System.currentTimeMillis() - autoPlayLockTime > 1200) { 
-                                        AutoPlayService.performShot(scaledStriker[0].x, scaledStriker[0].y, result.aimAngle, 450f)
-                                        autoPlayLockTime = 0L 
+                                        autoPlayLockTime = currentTime
+                                    } else if (currentTime - autoPlayLockTime > 900) { 
+                                        AutoPlayService.performShot(scaledStriker[0].x, scaledStriker[0].y, result.aimAngle, 460f)
+                                        autoPlayLockTime = currentTime + 1500 // পরবর্তী শটের জন্য কুডাউন গ্যাপ
                                     }
-                                } else {
+                                } else if (!isAutoPlayOn) {
                                     autoPlayLockTime = 0L
                                 }
                             } else {
