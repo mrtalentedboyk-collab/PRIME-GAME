@@ -70,15 +70,19 @@ class MainActivity : AppCompatActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == 1000 && resultCode == RESULT_OK) {
+        if (requestCode == 1000 && resultCode == RESULT_OK && data != null) {
             val intent = Intent(this, CaptureOverlayService::class.java).apply {
                 putExtra("RESULT_CODE", resultCode)
                 putExtra("RESULT_DATA", data)
             }
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                startForegroundService(intent)
-            } else {
-                startService(intent)
+            try {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    startForegroundService(intent)
+                } else {
+                    startService(intent)
+                }
+            } catch (e: Exception) {
+                Toast.makeText(this, "Error starting service: ${e.message}", Toast.LENGTH_SHORT).show()
             }
 
             val prefs = getSharedPreferences("PrimeGamePrefs", Context.MODE_PRIVATE)
@@ -89,7 +93,7 @@ class MainActivity : AppCompatActivity() {
                 if (launchIntent != null) {
                     startActivity(launchIntent)
                 } else {
-                    Toast.makeText(this, "Assistant started. Open your game!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Assistant active in background!", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
                 // Ignore
