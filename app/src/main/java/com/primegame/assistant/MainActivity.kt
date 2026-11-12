@@ -27,10 +27,10 @@ class MainActivity : AppCompatActivity() {
         val title = TextView(this).apply {
             text = "PRIME GAME ASSISTANT"
             setTextColor(android.graphics.Color.parseColor("#00E5FF"))
-            textSize = 20f
+            textSize = 22f
             gravity = Gravity.CENTER
             setTypeface(null, android.graphics.Typeface.BOLD)
-            setPadding(0, 0, 0, 40)
+            setPadding(0, 0, 0, 50)
         }
 
         val prefs = getSharedPreferences("PrimeGamePrefs", Context.MODE_PRIVATE)
@@ -89,10 +89,10 @@ class MainActivity : AppCompatActivity() {
                 if (launchIntent != null) {
                     startActivity(launchIntent)
                 } else {
-                    Toast.makeText(this, "Game opened in background overlay mode", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Assistant started. Open your game!", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
-                // Ignore if package not found
+                // Ignore
             }
             finish()
         }
