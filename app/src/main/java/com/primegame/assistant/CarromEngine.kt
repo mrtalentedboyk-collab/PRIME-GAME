@@ -1,158 +1,55 @@
 package com.primegame.assistant
 
 import android.graphics.Bitmap
-import android.graphics.Color
 import android.graphics.PointF
-import android.graphics.RectF
-import kotlin.math.*
 
 class CarromEngine {
+    init {
+        System.loadLibrary("primegame")
+    }
 
+    data class Coin(val pos: PointF, val isMine: Boolean)
+    
     data class AnalysisResult(
         val strikerTrajectory: List<PointF>,
-        val coinTrajectory: List<PointF>,
-        val collisionPoint: PointF?,
+        val allCoins: List<Coin>,
+        val targetCoinPath: List<PointF>?,
         val targetPocket: PointF?,
         val aimAngle: Float,
         val isBotAiming: Boolean
     )
 
+    private external fun processFrameNative(bitmap: Bitmap, width: Int, height: Int, isAutoPlayOn: Boolean): FloatArray?
+
     fun processFrame(bitmap: Bitmap, screenWidth: Int, screenHeight: Int, isAutoPlayOn: Boolean): AnalysisResult? {
-        val scaleX = screenWidth.toFloat() / bitmap.width.toFloat()
-        val scaleY = screenHeight.toFloat() / bitmap.height.toFloat()
+        val data = processFrameNative(bitmap, screenWidth, screenHeight, isAutoPlayOn) ?: return null
         
-        // বোর্ডের সঠিক মাপ (স্ক্রিন অনুযায়ী)
-        val boardMargin = 45f
-        val boardSize = screenWidth - (boardMargin * 2)
-        val boardTop = (screenHeight - screenWidth) / 2f + boardMargin
-        val boardRect = RectF(boardMargin, boardTop, screenWidth - boardMargin, boardTop + boardSize)
+        val strikerX = data[0]; val strikerY = data[1]
+        val aimAngle = data[2]; val isBotAiming = data[3] > 0.5f
+        val targetCoinX = data[4]; val targetCoinY = data[5]
+        val targetPocketX = data[6]; val targetPocketY = data[7]
+        val numCoins = data[8].toInt()
 
-        val pockets = listOf(
-            PointF(boardRect.left + 45f, boardRect.top + 45f),
-            PointF(boardRect.right - 45f, boardRect.top + 45f),
-            PointF(boardRect.left + 45f, boardRect.bottom - 45f),
-            PointF(boardRect.right - 45f, boardRect.bottom - 45f)
-        )
-
-        // গুটি (Coins) এবং স্ট্রাইকার স্ক্যান করা
-        val coins = mutableListOf<PointF>()
-        var strikerPt: PointF? = null
-
-        val startY = (boardRect.top / scaleY).toInt()
-        val endY = (boardRect.bottom / scaleY).toInt()
-        val startX = (boardRect.left / scaleX).toInt()
-        val endX = (boardRect.right / scaleX).toInt()
-
-        val baselineY = boardRect.bottom - (boardSize * 0.15f) // স্ট্রাইকারের জায়গা
-        
-        for (y in startY until endY step 4) {
-            for (x in startX until endX step 4) {
-                val p = bitmap.getPixel(x, y)
-                val r = Color.red(p); val g = Color.green(p); val b = Color.blue(p)
-                
-                val isWhite = r > 200 && g > 200 && b > 200
-                val isBlack = r in 15..70 && g in 15..70 && b in 15..70
-                
-                if (isWhite || isBlack) {
-                    val realX = x * scaleX
-                    val realY = y * scaleY
-                    
-                    if (isWhite && abs(realY - baselineY) < 80f && realY > boardRect.centerY()) {
-                        if (strikerPt == null) strikerPt = PointF(realX, realY)
-                    } else {
-                        if (coins.none { hypot(it.x - realX, it.y - realY) < 30f }) {
-                            coins.add(PointF(realX, realY))
-                        }
-                    }
-                }
-            }
+        val allCoins = mutableListOf<Coin>()
+        var index = 9
+        for (i in 0 until numCoins) {
+            allCoins.add(Coin(PointF(data[index], data[index+1]), data[index+2] > 0.5f))
+            index += 3
         }
 
-        if (strikerPt == null) {
-            strikerPt = PointF(boardRect.centerX(), baselineY)
+        val strikerTrajectory = mutableListOf(PointF(strikerX, strikerY))
+        val targetCoinPath = mutableListOf<PointF>()
+        var targetPocketPt: PointF? = null
+
+        if (isBotAiming && targetCoinX > 0) {
+            // C++ থেকে পাওয়া অ্যাঙ্গেল অনুযায়ী লাইন টানা
+            val hitPt = PointF(targetCoinX + Math.cos(aimAngle.toDouble()).toFloat() * 60f, targetCoinY + Math.sin(aimAngle.toDouble()).toFloat() * 60f)
+            strikerTrajectory.add(hitPt)
+            targetCoinPath.add(PointF(targetCoinX, targetCoinY))
+            targetPocketPt = PointF(targetPocketX, targetPocketY)
+            targetCoinPath.add(targetPocketPt)
         }
 
-        var aimAngleRad = 0f
-        var bestCoin: PointF? = null
-        var bestPocket: PointF? = null
-        var isBotAiming = false
-
-        // প্রো-বট লজিক (নিজে গুটি খুঁজবে এবং টার্গেট করবে)
-        if (isAutoPlayOn && coins.isNotEmpty()) {
-            var bestScore = Float.MAX_VALUE
-            for (coin in coins) {
-                for (pocket in pockets) {
-                    val anglePocketToCoin = atan2(coin.y - pocket.y, coin.x - pocket.x)
-                    val ghostX = coin.x + cos(anglePocketToCoin) * 60f
-                    val ghostY = coin.y + sin(anglePocketToCoin) * 60f
-                    
-                    val angleStrikerToGhost = atan2(ghostY - strikerPt.y, ghostX - strikerPt.x)
-                    val cutAngle = abs(anglePocketToCoin - angleStrikerToGhost)
-                    
-                    if (cutAngle < bestScore) {
-                        bestScore = cutAngle
-                        bestCoin = coin
-                        bestPocket = pocket
-                        aimAngleRad = angleStrikerToGhost
-                    }
-                }
-            }
-            isBotAiming = true
-        } else {
-            // ম্যানুয়াল এইম (কাঠের রঙ ইগনোর করে শুধু অ্যারো ধরবে)
-            var arrowX = 0f; var arrowY = 0f; var arrowCount = 0
-            for (y in startY until endY step 3) {
-                for (x in startX until endX step 3) {
-                    val p = bitmap.getPixel(x, y)
-                    val r = Color.red(p); val g = Color.green(p); val b = Color.blue(p)
-                    // Bright Yellow/Orange Arrow
-                    if (r > 220 && g > 150 && b < 50) {
-                        arrowX += x; arrowY += y; arrowCount++
-                    }
-                }
-            }
-            if (arrowCount > 5) {
-                val aX = (arrowX / arrowCount) * scaleX
-                val aY = (arrowY / arrowCount) * scaleY
-                aimAngleRad = atan2(aY - strikerPt.y, aX - strikerPt.x)
-            } else return null
-        }
-
-        val strikerPath = mutableListOf<PointF>(strikerPt)
-        val coinPath = mutableListOf<PointF>()
-        var hitCoinPt: PointF? = null
-        
-        var rayX = strikerPt.x
-        var rayY = strikerPt.y
-        val stepX = cos(aimAngleRad) * 5f
-        val stepY = sin(aimAngleRad) * 5f
-        
-        for (i in 0..250) {
-            rayX += stepX
-            rayY += stepY
-            
-            if (rayX <= boardRect.left || rayX >= boardRect.right || rayY <= boardRect.top || rayY >= boardRect.bottom) {
-                strikerPath.add(PointF(rayX, rayY))
-                break
-            }
-            
-            var collided = false
-            for (coin in coins) {
-                if (hypot(rayX - coin.x, rayY - coin.y) < 60f) {
-                    hitCoinPt = PointF(rayX, rayY)
-                    strikerPath.add(hitCoinPt)
-                    
-                    coinPath.add(coin)
-                    val targetPkt = bestPocket ?: pockets.minByOrNull { hypot(it.x - coin.x, it.y - coin.y) }
-                    targetPkt?.let { coinPath.add(it) }
-                    
-                    collided = true
-                    break
-                }
-            }
-            if (collided) break
-        }
-
-        return AnalysisResult(strikerPath, coinPath, hitCoinPt, bestPocket, aimAngleRad, isBotAiming)
+        return AnalysisResult(strikerTrajectory, allCoins, if (targetCoinPath.isNotEmpty()) targetCoinPath else null, targetPocketPt, aimAngle, isBotAiming)
     }
 }
