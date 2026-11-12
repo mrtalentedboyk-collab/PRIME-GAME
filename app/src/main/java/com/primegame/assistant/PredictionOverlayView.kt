@@ -13,6 +13,7 @@ class PredictionOverlayView(context: Context) : View(context) {
     private var targetCoinPath: List<PointF>? = null
 
     private val linePaint = Paint().apply { color = Color.YELLOW; strokeWidth = 6f; style = Paint.Style.STROKE; isAntiAlias = true }
+    private val circlePaint = Paint().apply { color = Color.RED; strokeWidth = 5f; style = Paint.Style.STROKE; isAntiAlias = true }
     private val coinPaintMine = Paint().apply { color = Color.GREEN; strokeWidth = 4f; style = Paint.Style.STROKE; isAntiAlias = true }
     private val coinPaintOpponent = Paint().apply { color = Color.RED; strokeWidth = 4f; style = Paint.Style.STROKE; isAntiAlias = true }
 
@@ -40,12 +41,18 @@ class PredictionOverlayView(context: Context) : View(context) {
 
         if (isAimPredictionEnabled) {
             strikerPath?.let { path ->
-                if (path.size >= 2) canvas.drawLine(path[0].x, path[0].y, path[1].x, path[1].y, linePaint)
+                if (path.size >= 2) {
+                    canvas.drawLine(path[0].x, path[0].y, path[1].x, path[1].y, linePaint)
+                    // স্ট্রাইকার হিট পয়েন্টে সার্কেল
+                    canvas.drawCircle(path[1].x, path[1].y, 35f, circlePaint)
+                }
             }
             targetCoinPath?.let { path ->
                 if (path.size >= 2) {
                     linePaint.color = Color.CYAN 
                     canvas.drawLine(path[0].x, path[0].y, path[1].x, path[1].y, linePaint)
+                    // পকেটের দিকে যাওয়ার লাইনের শেষে সার্কেল
+                    canvas.drawCircle(path[1].x, path[1].y, 35f, circlePaint)
                     linePaint.color = Color.YELLOW
                 }
             }
