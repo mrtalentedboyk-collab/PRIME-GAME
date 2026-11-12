@@ -36,7 +36,6 @@ class CaptureOverlayService : Service() {
     @Volatile private var isProcessingFrame = false
     private val mainHandler = Handler(Looper.getMainLooper())
     
-    // Auto Play Cooldown
     private var autoPlayLockTime = 0L
 
     override fun onBind(intent: Intent?) = null
@@ -122,7 +121,7 @@ class CaptureOverlayService : Service() {
                             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
                             this.isChecked = false
                         } else if(isChecked) {
-                            Toast.makeText(this@CaptureOverlayService, "Auto Play Enabled! Hold aim to shoot.", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this@CaptureOverlayService, "Bot Activated! Finding targets...", Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
@@ -161,7 +160,7 @@ class CaptureOverlayService : Service() {
 
         imageReader?.setOnImageAvailableListener({ reader ->
             val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
-            if (isProcessingFrame || predictionCanvas?.isAimPredictionEnabled != true) { image.close(); return@setOnImageAvailableListener }
+            if (isProcessingFrame || (!predictionCanvas!!.isAimPredictionEnabled && !sharedPreferences.getBoolean("auto_play", false))) { image.close(); return@setOnImageAvailableListener }
             isProcessingFrame = true
             
             Thread {
@@ -177,20 +176,20 @@ class CaptureOverlayService : Service() {
                     bitmap.copyPixelsFromBuffer(buffer)
                     image.close()
                     
-                    val result = carromEngine.processFrame(bitmap, screenWidth, screenHeight)
+                    val isAutoPlayOn = sharedPreferences.getBoolean("auto_play", false)
+                    val result = carromEngine.processFrame(bitmap, screenWidth, screenHeight, isAutoPlayOn)
                     
                     mainHandler.post {
                         if (result != null) {
                             predictionCanvas?.updatePredictions(result.strikerTrajectory, result.coinTrajectory, result.collisionPoint, result.targetPocket)
                             
-                            // Auto Play Logic
-                            // *** ERROR FIXED HERE: hitCoinPt changed to collisionPoint ***
-                            if (sharedPreferences.getBoolean("auto_play", false) && result.collisionPoint != null) {
+                            // বট নিজে টার্গেট করে ১.৫ সেকেন্ড পর শুট করবে
+                            if (isAutoPlayOn && result.isBotAiming && result.strikerTrajectory.isNotEmpty()) {
                                 if (autoPlayLockTime == 0L) {
                                     autoPlayLockTime = System.currentTimeMillis()
-                                } else if (System.currentTimeMillis() - autoPlayLockTime > 1200) { // Lock for 1.2 seconds before shooting
+                                } else if (System.currentTimeMillis() - autoPlayLockTime > 1500) { 
                                     AutoPlayService.performShot(result.strikerTrajectory[0].x, result.strikerTrajectory[0].y, result.aimAngle, 450f)
-                                    autoPlayLockTime = 0L // Reset after shot
+                                    autoPlayLockTime = 0L 
                                 }
                             } else {
                                 autoPlayLockTime = 0L
