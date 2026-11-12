@@ -70,7 +70,7 @@ class CaptureOverlayService : Service() {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
         }.setContentTitle("PRIME GAME Active")
-         .setContentText("Overlay and Bot running")
+         .setContentText("Continuous Auto-Play & Aim Active")
          .setSmallIcon(android.R.drawable.ic_menu_compass)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -154,7 +154,7 @@ class CaptureOverlayService : Service() {
 
         addFeatureSwitch("Aim prediction", "aim_pred")
         addFeatureSwitch("Coin collision lines", "coin_col")
-        addFeatureSwitch("Auto Play (Bot)", "auto_play")
+        addFeatureSwitch("Continuous Auto Play", "auto_play")
 
         miniMenu.setOnClickListener { miniMenu.visibility = View.GONE; fullMenu.visibility = View.VISIBLE; hudParams.width = (screenWidth * 0.82f).toInt(); windowManager.updateViewLayout(rootContainer, hudParams) }
         rootContainer.addView(fullMenu); rootContainer.addView(miniMenu)
@@ -214,14 +214,14 @@ class CaptureOverlayService : Service() {
 
                                 predictionCanvas?.updatePredictions(scaledStriker, scaledCoins, scaledTarget, null)
                                 
-                                // অপনেন্ট নয়, শুধুমাত্র নিজের গুটি পকেটে ফেলার জন্য ম্যাচ উইন পর্যন্ত টানা অটো-প্লে লজিক
+                                // টানা অটো-প্লে লজিক: যতক্ষণ ইউজার অফ না করবে, ম্যাচ জিততে থাকবে
                                 if (isAutoPlayOn && result.isBotAiming && scaledStriker.isNotEmpty()) {
                                     val currentTime = System.currentTimeMillis()
                                     if (autoPlayLockTime == 0L) {
                                         autoPlayLockTime = currentTime
-                                    } else if (currentTime - autoPlayLockTime > 900) { 
-                                        AutoPlayService.performShot(scaledStriker[0].x, scaledStriker[0].y, result.aimAngle, 460f)
-                                        autoPlayLockTime = currentTime + 1500 // পরবর্তী শটের জন্য কুডাউন গ্যাপ
+                                    } else if (currentTime - autoPlayLockTime > 800) { 
+                                        AutoPlayService.performShot(scaledStriker[0].x, scaledStriker[0].y, result.aimAngle, 480f)
+                                        autoPlayLockTime = currentTime + 2000 // শট শেষ হওয়ার জন্য সঠিক ডিলে
                                     }
                                 } else if (!isAutoPlayOn) {
                                     autoPlayLockTime = 0L
